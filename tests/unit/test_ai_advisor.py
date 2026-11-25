@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from recruiting.ai_advisor import validate_llm_base_url
+from recruiting.ai_advisor import (
+    generate_candidate_insight,
+    generate_employer_insight,
+    validate_llm_base_url,
+)
 from recruiting.matching import rank_applicants, rank_jobs
 
 
@@ -167,6 +171,38 @@ def test_fp_match_2_prompt_injection_and_secret_leak_guardrails(app, client, log
     resp_bad_json = client.post(f"/candidate/jobs/{ids['backend']}/ai-insight")
     assert resp_bad_json.status_code == 200
     assert "Offline deterministic fallback" in resp_bad_json.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("audience", ["candidate", "employer"])
+def test_fp_match_2_sanitizes_skills_before_sending_to_provider(audience):
+    payloads = []
+
+    def provider(*, messages, model, timeout_seconds):
+        payloads.append(json.loads(messages[1]["content"].splitlines()[2]))
+        return json.dumps(
+            {"summary": "Skill match overview.", "strengths": [], "gaps": [], "next_steps": []}
+        )
+
+    shared = {
+        "config": {"AI_ADVISOR_ENABLED": True, "AI_COMPLETION_PROVIDER": provider},
+        "candidate_skills": ["Py\u202ethon", "Git\u200b"],
+        "job_title": "Engineer",
+        "job_description": "Build tools.",
+        "required_skills": ["Py\u202ethon", "A" * 200],
+    }
+    if audience == "candidate":
+        result = generate_candidate_insight(**shared, company_name="Example")
+    else:
+        result = generate_employer_insight(
+            **shared, candidate_display_name="Candidate", application_status="Pending"
+        )
+
+    assert result.source == "llm"
+    (payload,) = payloads
+    assert payload["matched_skills"] == ["Python"]
+    assert payload["extra_candidate_skills"] == ["Git"]
+    assert payload["missing_skills"] == ["A" * 120]
+    assert payload["deterministic_match_score"] == result.deterministic_score == 50
 
 
 @pytest.mark.parametrize(

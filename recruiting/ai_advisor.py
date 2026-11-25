@@ -64,6 +64,11 @@ def sanitize_untrusted_text(value: str | None, max_len: int) -> str:
     return cleaned
 
 
+def _sanitized_advisor_skills(skills: list[str]) -> list[str]:
+    cleaned = [sanitize_untrusted_text(skill, 120) for skill in skills[:20]]
+    return [skill for skill in cleaned if skill]
+
+
 def _is_public_ip(ip_obj) -> bool:
     return bool(
         ip_obj.is_global
@@ -493,9 +498,9 @@ def generate_candidate_insight(
     breakdown = explain_skill_match(candidate_skills, required_skills)
     payload = {
         "deterministic_match_score": breakdown["score"],
-        "matched_skills": breakdown["matched_skills"][:20],
-        "missing_skills": breakdown["missing_skills"][:20],
-        "extra_candidate_skills": breakdown["extra_skills"][:20],
+        "matched_skills": _sanitized_advisor_skills(breakdown["matched_skills"]),
+        "missing_skills": _sanitized_advisor_skills(breakdown["missing_skills"]),
+        "extra_candidate_skills": _sanitized_advisor_skills(breakdown["extra_skills"]),
         "job_title": sanitize_untrusted_text(job_title, 120),
         "company_name": sanitize_untrusted_text(company_name, 120),
         "job_description": sanitize_untrusted_text(job_description, 1500),
@@ -548,9 +553,9 @@ def generate_employer_insight(
     breakdown = explain_skill_match(candidate_skills, required_skills)
     payload = {
         "deterministic_match_score": breakdown["score"],
-        "matched_skills": breakdown["matched_skills"][:20],
-        "missing_skills": breakdown["missing_skills"][:20],
-        "extra_candidate_skills": breakdown["extra_skills"][:20],
+        "matched_skills": _sanitized_advisor_skills(breakdown["matched_skills"]),
+        "missing_skills": _sanitized_advisor_skills(breakdown["missing_skills"]),
+        "extra_candidate_skills": _sanitized_advisor_skills(breakdown["extra_skills"]),
         "job_title": sanitize_untrusted_text(job_title, 120),
         "job_description": sanitize_untrusted_text(job_description, 1500),
         "candidate_display_name": sanitize_untrusted_text(candidate_display_name, 80),
