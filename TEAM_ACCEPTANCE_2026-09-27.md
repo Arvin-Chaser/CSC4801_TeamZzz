@@ -270,12 +270,9 @@ http://127.0.0.1:8080/healthz
 
 ## 13. 当前已知非必做功能
 
-以下没有实现，但不影响当前 mandatory requirements：
+PDF 简历上传和提取仍为可选功能，当前使用纯文本简历。
 
-- PDF resume upload/extraction。
-- FP-MATCH-2 optional LLM explanation。
-
-项目故意保持不依赖外部 AI 服务，保证助教可以从 clean checkout 直接本地或 Docker 运行。
+FP-MATCH-2 已实现。默认使用离线的确定性解释，助教可从干净的检出目录直接在本机或 Docker 运行。外部 LLM 需要显式启用，配置和数据流见 `INSTALL.md` 与 `SPEC.md`。
 
 ## 14. 组员验收结论
 
