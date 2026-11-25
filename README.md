@@ -4,7 +4,7 @@ TalentMatch is a locally runnable full-stack recruiting and candidate-matching p
 
 Group name: **Zzz**
 
-Project repository: https://github.com/shenyuwu100-netizen/CSC4801_TeamZzz
+Project repository: https://github.com/Arvin-Chaser/CSC4801_TeamZzz
 
 Live demo: https://csc4801.wushenyu.com
 
