@@ -66,8 +66,10 @@ def register():
             error = "Username is required."
         elif len(username) > 80:
             error = "Username is too long."
-        elif len(password) < 8:
-            error = "Password must be at least 8 characters."
+        elif len(password) < 8 or not password.strip():
+            error = "Password must be at least 8 non-whitespace characters."
+        elif len(password) > 128:
+            error = "Password must be at most 128 characters."
         elif role not in ROLES:
             error = "Role must be Candidate or Employer."
 

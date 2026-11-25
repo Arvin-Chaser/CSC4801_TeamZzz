@@ -41,9 +41,16 @@ The application reads these variables:
 
 | Variable | Required | Meaning |
 |---|---|---|
-| SECRET_KEY | No for local demo; yes for any shared deployment | Flask session-signing secret |
-| DATABASE_PATH | No | SQLite path. Default: Flask instance directory |
-| PYTHONUNBUFFERED | No | Useful for container logs |
+| `SECRET_KEY` | No for local demo; yes for any shared deployment | Flask session-signing secret |
+| `DATABASE_PATH` | No | SQLite path. Default: Flask instance directory (`/data/recruiting.sqlite3` in Docker) |
+| `PYTHONUNBUFFERED` | No | Useful for container logs |
+| `FLASK_DEBUG` | No | Local dev debug mode for `python -m recruiting` (default `false`) |
+| `MAX_CONTENT_LENGTH` | No | Global max request size in bytes (default `2097152`) |
+| `AI_ADVISOR_ENABLED` | No | Enable optional FP-MATCH-2 outbound LLM calls (default `false`; offline fallback is always available) |
+| `LLM_API_BASE_URL` | No | Optional HTTPS OpenAI-compatible base URL (public hosts only; private/loopback hosts blocked) |
+| `LLM_API_KEY` | No | Optional API key for FP-MATCH-2 (never commit real keys; unused when disabled or in tests) |
+| `LLM_MODEL` | No | Optional model name for FP-MATCH-2 (default `mimo-v2.6-pro`) |
+| `LLM_TIMEOUT_SECONDS` | No | Optional upstream LLM timeout in seconds, clamped to 1–15 (default `8`) |
 
 The application does not auto-load .env. Set environment variables in your shell/container explicitly.
 
@@ -158,7 +165,7 @@ docker rm -f csc4801-teamzzz
 ## Clean-Checkout Verification Before Submission
 
 ~~~bash
-git clone https://github.com/shenyuwu100-netizen/CSC4801_TeamZzz.git
+git clone https://github.com/Arvin-Chaser/CSC4801_TeamZzz.git
 cd CSC4801_TeamZzz
 git checkout main
 docker build -t csc4801-teamzzz .

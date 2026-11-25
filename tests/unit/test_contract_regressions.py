@@ -7,8 +7,8 @@ from threading import Barrier
 import pytest
 
 from recruiting.db import get_db
-from recruiting.matching import skill_match_score, skills_to_json
-from recruiting.services import DomainError, book_slot, create_slot, delete_job, delete_slot
+from recruiting.matching import explain_skill_match, skill_match_score, skills_to_json
+from recruiting.services import DomainError, apply_to_job, book_slot, create_slot, delete_job, delete_slot
 
 
 def _free_slot(db, ids):
@@ -188,3 +188,69 @@ def test_fp_sched_2_expired_slot_leaves_database_unchanged(db, ids):
     assert conflict.value.message == "Interview slot is no longer in the future"
     assert [tuple(row) for row in db.execute("SELECT * FROM bookings ORDER BY id")] == before
     assert not db.in_transaction
+
+
+@pytest.mark.parametrize(
+    "start_at, end_at",
+    [
+        ("0001-01-01T01:00", "0001-01-01T01:30"),
+        ("9999-12-31T23:45-08:00", "9999-12-31T23:59-08:00"),
+    ],
+)
+def test_fp_sched_1_overflow_datetime_returns_400_not_500(client, login, ids, start_at, end_at):
+    login("acme")
+    response = client.post(
+        "/employer/slots",
+        data={"job_id": ids["backend"], "start_at": start_at, "end_at": end_at},
+    )
+    assert response.status_code == 400
+
+
+def test_fp_can_3_concurrent_job_delete_before_apply_returns_404(app, db, ids):
+    job = _other_job(db, ids)
+
+    def concurrent_delete():
+        with app.app_context():
+            delete_job(get_db(), ids["acme"], job)
+
+    connection = _ConcurrentWriteBeforeTransaction(db, concurrent_delete)
+    with pytest.raises(DomainError) as not_found:
+        apply_to_job(connection, ids["bob"], job)
+    assert not_found.value.status_code == 404
+    assert db.execute("SELECT COUNT(*) FROM applications WHERE job_id=?", (job,)).fetchone()[0] == 0
+
+
+def test_fp_sched_1_concurrent_job_delete_before_slot_create_returns_404(app, db, ids):
+    job = _other_job(db, ids)
+
+    def concurrent_delete():
+        with app.app_context():
+            delete_job(get_db(), ids["acme"], job)
+
+    connection = _ConcurrentWriteBeforeTransaction(db, concurrent_delete)
+    start = datetime(2099, 7, 1, 10, 0, tzinfo=timezone.utc)
+    with pytest.raises(DomainError) as not_found:
+        create_slot(connection, ids["acme"], job, start, start + timedelta(minutes=30))
+    assert not_found.value.status_code == 404
+
+
+def test_fp_emp_3_applicant_resume_visible_only_to_owning_employer(client, login, ids):
+    login("acme")
+    # Direct resume URL stays 403 per FP-CAN-1.
+    assert client.get(f"/candidate/resume/{ids['alice']}").status_code == 403
+    # Owning employer can view applicant resume inline on their job's applicants screen.
+    html = client.get(f"/employer/jobs/{ids['backend']}/applicants").get_data(as_text=True)
+    assert "Backend candidate with Python and SQL." in html
+
+    client.post("/auth/logout")
+    login("beta")
+    assert client.get(f"/employer/jobs/{ids['backend']}/applicants").status_code == 403
+
+
+def test_fp_match_1_explain_skill_match_consistency():
+    breakdown = explain_skill_match(["Python", "Docker"], ["Python", "SQL"])
+    assert breakdown["score"] == skill_match_score(["Python", "Docker"], ["Python", "SQL"]) == 50
+    assert breakdown["matched_skills"] == ["Python"]
+    assert breakdown["missing_skills"] == ["SQL"]
+    assert breakdown["extra_skills"] == ["Docker"]
+    assert breakdown["next_skill_score"] == 100

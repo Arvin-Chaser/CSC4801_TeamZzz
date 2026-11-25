@@ -6,9 +6,11 @@
 
 在线演示：https://csc4801.wushenyu.com
 
-GitHub：https://github.com/shenyuwu100-netizen/CSC4801_TeamZzz
+GitHub：https://github.com/Arvin-Chaser/CSC4801_TeamZzz
 
-在线演示使用独立的合成数据环境，每天自动重置；请不要输入真实个人信息。正式课程交付仍以 GitHub 固定 commit 与 Docker 可复现流程为准。
+在线演示使用独立的合成数据环境，容器普通重启会保留数据，仅在需要演示前通过 `reset-demo.ps1` 手动重置为确定性种子数据；请不要输入真实个人信息。正式课程交付仍以 GitHub 固定 commit 与 Docker 可复现流程为准。
+
+> 2026-11-25 终版强化：已修复简历直链 404/403 枚举、日期边界 `OverflowError`、并发删岗与申请/建时段竞态、`LIKE` 通配符未转义与安全响应头；升级前端匹配度可解释面板与雇主申请人页只读简历预览；新增严格沙箱化、默认离线降级的 `FP-MATCH-2` 可选 AI 洞察模块并补齐对应单元测试与文档。
 
 ## 1. 这个项目在干什么
 
