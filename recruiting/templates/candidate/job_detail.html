@@ -1,17 +1,104 @@
 {% extends 'base.html' %}
 {% block title %}{{ job.title }} · TalentMatch{% endblock %}
 {% block content %}
+{% set bar_class = 'high' if breakdown.score >= 80 else ('mid' if breakdown.score >= 40 else 'low') %}
 <section class="panel">
-  <p class="eyebrow">{{ job.company_name }}</p>
-  <h1>{{ job.title }}</h1>
+  <div class="detail-header">
+    <div>
+      <p class="eyebrow">{{ job.company_name }}</p>
+      <h1>{{ job.title }}</h1>
+      {% if job.company_description %}
+        <p class="muted">{{ job.company_description }}</p>
+      {% endif %}
+    </div>
+    <div class="score-box">
+      <div class="score">{{ breakdown.score }}<span>%</span></div>
+      <progress class="score-bar {{ bar_class }}" value="{{ breakdown.score }}" max="100"></progress>
+      <p class="score-caption">Required score</p>
+    </div>
+  </div>
+
   <p><strong>Required skills:</strong> {{ required_skills|join(', ') if required_skills else 'None' }}</p>
+  {% if required_skills %}
+    <div class="pill-group">
+      {% for skill in breakdown.matched_skills %}
+        <span class="pill matched">Matched: {{ skill }}</span>
+      {% endfor %}
+      {% for skill in breakdown.missing_skills %}
+        <span class="pill missing">Missing: {{ skill }}</span>
+      {% endfor %}
+    </div>
+    {% if breakdown.next_skill_score is not none %}
+      <p class="muted">Deterministic projection: adding one missing skill raises your match score from {{ breakdown.score }}% to {{ breakdown.next_skill_score }}%.</p>
+    {% endif %}
+  {% endif %}
+
   <div class="prose">{{ job.description }}</div>
+
   {% if applied %}
-    <p class="muted">You already applied to this job.</p>
+    <div class="actions">
+      <span class="pill status-{{ applied.status|lower }}">Already applied · {{ applied.status }}</span>
+      <a class="button secondary small" href="{{ url_for('candidate.application_detail', application_id=applied.id) }}">Open application</a>
+    </div>
   {% else %}
     <form method="post" action="{{ url_for('candidate.apply', job_id=job.id) }}">
       <button class="button" type="submit">Apply now</button>
     </form>
+  {% endif %}
+</section>
+
+<section class="panel ai-panel">
+  <div class="ai-header">
+    <div>
+      <p class="eyebrow">Optional FP-MATCH-2 · Secondary Explanation</p>
+      <h2>Role Fit Advisor</h2>
+    </div>
+    {% if ai_insight %}
+      <span class="pill {{ 'source-llm' if ai_insight.source == 'llm' else 'source-fallback' }}">
+        {{ 'LLM · ' ~ ai_insight.model if ai_insight.source == 'llm' else 'Offline deterministic fallback' }}
+      </span>
+    {% endif %}
+  </div>
+  <p class="muted">
+    Secondary guidance only — it never changes your deterministic match score ({{ breakdown.score }}%) or dashboard ordering.
+    Untrusted text is sandboxed before any optional external LLM call.
+  </p>
+
+  <form method="post" action="{{ url_for('candidate.job_ai_insight', job_id=job.id) }}" class="stack">
+    <label class="checkbox-row">
+      <input type="checkbox" name="include_resume" value="1" {% if ai_insight and ai_insight.resume_included %}checked{% endif %}>
+      Include my own private raw-text resume excerpt in this optional analysis (opt-in)
+    </label>
+    <div class="actions">
+      <button class="button accent small" type="submit">Generate fit insight</button>
+    </div>
+  </form>
+
+  {% if ai_insight %}
+    <div class="notice">
+      <strong>{{ ai_insight.summary }}</strong>
+      <p class="muted">{{ ai_insight.notice }}</p>
+    </div>
+    <div class="ai-grid">
+      <div class="ai-col">
+        <h3>Strengths</h3>
+        <ul>
+          {% for item in ai_insight.strengths %}<li>{{ item }}</li>{% else %}<li>None highlighted.</li>{% endfor %}
+        </ul>
+      </div>
+      <div class="ai-col">
+        <h3>Skill gaps</h3>
+        <ul>
+          {% for item in ai_insight.gaps %}<li>{{ item }}</li>{% else %}<li>No required gaps.</li>{% endfor %}
+        </ul>
+      </div>
+      <div class="ai-col">
+        <h3>Suggested next steps</h3>
+        <ul>
+          {% for item in ai_insight.next_steps %}<li>{{ item }}</li>{% else %}<li>Review role details.</li>{% endfor %}
+        </ul>
+      </div>
+    </div>
   {% endif %}
 </section>
 {% endblock %}

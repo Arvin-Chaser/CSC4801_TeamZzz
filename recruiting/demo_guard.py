@@ -10,6 +10,13 @@ from .db import get_db
 
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+AI_ENDPOINTS = {"candidate.job_ai_insight", "employer.application_ai_insight"}
+CAPACITY_QUERIES = {
+    "auth.register": ("SELECT COUNT(*) AS n FROM users", "DEMO_MAX_USERS"),
+    "employer.job_new": ("SELECT COUNT(*) AS n FROM jobs", "DEMO_MAX_JOBS"),
+    "candidate.apply": ("SELECT COUNT(*) AS n FROM applications", "DEMO_MAX_APPLICATIONS"),
+    "employer.slot_create": ("SELECT COUNT(*) AS n FROM interview_slots", "DEMO_MAX_SLOTS"),
+}
 
 
 def install_demo_guard(app: Flask) -> None:
@@ -34,6 +41,9 @@ def install_demo_guard(app: Flask) -> None:
         elif endpoint == "auth.register":
             bucket = "register"
             limit = app.config["DEMO_REGISTER_PER_MINUTE"]
+        elif endpoint in AI_ENDPOINTS:
+            bucket = "ai"
+            limit = app.config["DEMO_AI_PER_MINUTE"]
         else:
             bucket = "write"
             limit = app.config["DEMO_WRITE_PER_MINUTE"]
@@ -63,15 +73,11 @@ def install_demo_guard(app: Flask) -> None:
                 for state_key in stale_keys:
                     rate_state.pop(state_key, None)
 
-        capacity = {
-            "auth.register": ("users", app.config["DEMO_MAX_USERS"]),
-            "employer.job_new": ("jobs", app.config["DEMO_MAX_JOBS"]),
-            "candidate.apply": ("applications", app.config["DEMO_MAX_APPLICATIONS"]),
-            "employer.slot_create": ("interview_slots", app.config["DEMO_MAX_SLOTS"]),
-        }.get(endpoint)
+        capacity = CAPACITY_QUERIES.get(endpoint)
         if capacity:
-            table, maximum = capacity
-            count = get_db().execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+            query_sql, config_key = capacity
+            maximum = app.config[config_key]
+            count = get_db().execute(query_sql).fetchone()["n"]
             if count >= maximum:
                 abort(
                     429,

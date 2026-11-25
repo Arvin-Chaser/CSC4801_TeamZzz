@@ -2,19 +2,68 @@
 {% block title %}Recommended jobs · TalentMatch{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">Candidate dashboard</p><h1>Recommended jobs</h1></div>
-  <a class="button secondary" href="{{ url_for('candidate.search') }}">Search jobs</a>
+  <div>
+    <p class="eyebrow">Candidate dashboard</p>
+    <h1>Recommended jobs</h1>
+  </div>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_for('candidate.profile') }}">Edit skills</a>
+    <a class="button secondary" href="{{ url_for('candidate.search') }}">Search jobs</a>
+  </div>
 </div>
-<p class="muted">All current jobs are ranked by the required deterministic skill-overlap score.</p>
+
+<p class="muted">
+  All current jobs are ranked by the required deterministic skill-overlap score.
+  Your active skills:
+  {% if candidate_skills %}
+    <strong>{{ candidate_skills|join(', ') }}</strong>
+  {% else %}
+    <strong>None yet</strong> (<a href="{{ url_for('candidate.profile') }}">add skills</a>)
+  {% endif %}
+</p>
+
 <div class="card-list">
   {% for job in jobs %}
+    {% set bar_class = 'high' if job.match_score >= 80 else ('mid' if job.match_score >= 40 else 'low') %}
+    {% set app_info = applied_map.get(job.id) %}
     <article class="job-card">
-      <div class="score">{{ job.match_score }}<span>%</span></div>
+      <div class="score-box">
+        <div class="score">{{ job.match_score }}<span>%</span></div>
+        <progress class="score-bar {{ bar_class }}" value="{{ job.match_score }}" max="100"></progress>
+        <p class="score-caption">
+          {% if job.required_skills %}
+            {{ job.matched_skills|length }}/{{ job.required_skills|length }} matched
+          {% else %}
+            Open skills
+          {% endif %}
+        </p>
+      </div>
       <div class="job-body">
-        <div class="job-title-row"><h2>{{ job.title }}</h2><span class="pill">{{ job.company_name }}</span></div>
+        <div class="job-title-row">
+          <h2><a href="{{ url_for('candidate.job_detail', job_id=job.id) }}">{{ job.title }}</a></h2>
+          <div class="actions">
+            <span class="pill">{{ job.company_name }}</span>
+            {% if app_info %}
+              <span class="pill status-{{ app_info.status|lower }}">Applied · {{ app_info.status }}</span>
+            {% endif %}
+          </div>
+        </div>
         <p><strong>Required skills:</strong> {{ job.required_skills|join(', ') if job.required_skills else 'None' }}</p>
+        {% if job.required_skills %}
+          <div class="pill-group">
+            {% for skill in job.matched_skills %}
+              <span class="pill matched">Matched: {{ skill }}</span>
+            {% endfor %}
+            {% for skill in job.missing_skills %}
+              <span class="pill missing">Missing: {{ skill }}</span>
+            {% endfor %}
+          </div>
+          {% if job.next_skill_score is not none %}
+            <p class="muted">Adding 1 missing skill lifts your required match score to <strong>{{ job.next_skill_score }}%</strong>.</p>
+          {% endif %}
+        {% endif %}
         <p>{{ job.description }}</p>
-        <a href="{{ url_for('candidate.job_detail', job_id=job.id) }}">View job →</a>
+        <a href="{{ url_for('candidate.job_detail', job_id=job.id) }}">View job &amp; insights →</a>
       </div>
     </article>
   {% else %}

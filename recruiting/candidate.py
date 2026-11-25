@@ -1,29 +1,83 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import timezone
 
-from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, url_for
 
+from .ai_advisor import generate_candidate_insight
 from .auth import role_required
 from .db import get_db, transaction
-from .matching import rank_jobs, skills_from_json, skills_to_json
-from .services import DomainError, book_slot, iso_utc, search_jobs, utc_now
+from .matching import explain_skill_match, rank_jobs, skills_from_json, skills_to_json
+from .services import DomainError, apply_to_job, book_slot, iso_utc, search_jobs, utc_now
 
 bp = Blueprint("candidate", __name__, url_prefix="/candidate")
+
+
+def _candidate_skills(db, user_id: int) -> list[str]:
+    row = db.execute(
+        "SELECT skills_json FROM candidate_profiles WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    return skills_from_json(row["skills_json"] if row else "[]")
+
+
+def _load_job_detail_context(db, candidate_id: int, job_id: int):
+    job = db.execute(
+        """
+        SELECT j.*, c.company_name, c.description AS company_description
+        FROM jobs AS j
+        JOIN company_profiles AS c ON c.user_id = j.employer_id
+        WHERE j.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+    if job is None:
+        abort(404, description="Job not found")
+    applied = db.execute(
+        "SELECT id, status FROM applications WHERE candidate_id = ? AND job_id = ?",
+        (candidate_id, job_id),
+    ).fetchone()
+    required_skills = skills_from_json(job["required_skills_json"])
+    candidate_skills = _candidate_skills(db, candidate_id)
+    breakdown = explain_skill_match(candidate_skills, required_skills)
+    return job, required_skills, candidate_skills, breakdown, applied
 
 
 @bp.get("/")
 @role_required("Candidate")
 def dashboard():
-    return render_template("candidate/dashboard.html", jobs=rank_jobs(get_db(), g.user["id"]))
+    db = get_db()
+    jobs = rank_jobs(db, g.user["id"])
+    candidate_skills = _candidate_skills(db, g.user["id"])
+    applied_rows = db.execute(
+        "SELECT job_id, id, status FROM applications WHERE candidate_id = ?",
+        (g.user["id"],),
+    ).fetchall()
+    applied_map = {row["job_id"]: dict(row) for row in applied_rows}
+    return render_template(
+        "candidate/dashboard.html",
+        jobs=jobs,
+        candidate_skills=candidate_skills,
+        applied_map=applied_map,
+    )
 
 
 @bp.get("/search")
 @role_required("Candidate")
 def search():
+    db = get_db()
     query = request.args.get("q", "")
-    rows = search_jobs(get_db(), query) if query else []
+    candidate_skills = _candidate_skills(db, g.user["id"])
+    rows = []
+    if query:
+        for row in search_jobs(db, query):
+            item = dict(row)
+            item["required_skills"] = skills_from_json(item.pop("required_skills_json"))
+            breakdown = explain_skill_match(candidate_skills, item["required_skills"])
+            item["match_score"] = breakdown["score"]
+            item["matched_skills"] = breakdown["matched_skills"]
+            item["missing_skills"] = breakdown["missing_skills"]
+            rows.append(item)
     return render_template("candidate/search.html", query=query, jobs=rows)
 
 
@@ -48,16 +102,20 @@ def profile():
         "SELECT display_name, skills_json FROM candidate_profiles WHERE user_id = ?",
         (g.user["id"],),
     ).fetchone()
+    skill_list = skills_from_json(row["skills_json"])
     return render_template(
         "candidate/profile.html",
         profile=row,
-        skills=", ".join(skills_from_json(row["skills_json"])),
+        skills=", ".join(skill_list),
+        skill_list=skill_list,
     )
 
 
 @bp.route("/resume/<int:candidate_id>", methods=("GET", "POST"))
 @role_required("Candidate")
 def resume(candidate_id: int):
+    if candidate_id != g.user["id"]:
+        abort(403, description="Resume is private")
     db = get_db()
     profile = db.execute(
         "SELECT user_id, display_name, resume_text FROM candidate_profiles WHERE user_id = ?",
@@ -65,8 +123,6 @@ def resume(candidate_id: int):
     ).fetchone()
     if profile is None:
         abort(404, description="Candidate profile not found")
-    if candidate_id != g.user["id"]:
-        abort(403, description="Resume is private")
 
     if request.method == "POST":
         resume_text = request.form.get("resume_text", "")
@@ -85,46 +141,62 @@ def resume(candidate_id: int):
 @role_required("Candidate")
 def job_detail(job_id: int):
     db = get_db()
-    job = db.execute(
-        """
-        SELECT j.*, c.company_name
-        FROM jobs AS j
-        JOIN company_profiles AS c ON c.user_id = j.employer_id
-        WHERE j.id = ?
-        """,
-        (job_id,),
-    ).fetchone()
-    if job is None:
-        abort(404, description="Job not found")
-    applied = db.execute(
-        "SELECT id FROM applications WHERE candidate_id = ? AND job_id = ?",
-        (g.user["id"], job_id),
-    ).fetchone()
+    job, required_skills, _candidate_skills, breakdown, applied = _load_job_detail_context(
+        db, g.user["id"], job_id
+    )
     return render_template(
         "candidate/job_detail.html",
         job=job,
-        required_skills=skills_from_json(job["required_skills_json"]),
+        required_skills=required_skills,
+        breakdown=breakdown,
         applied=applied,
+        ai_insight=None,
+    )
+
+
+@bp.post("/jobs/<int:job_id>/ai-insight")
+@role_required("Candidate")
+def job_ai_insight(job_id: int):
+    db = get_db()
+    job, required_skills, candidate_skills, breakdown, applied = _load_job_detail_context(
+        db, g.user["id"], job_id
+    )
+    include_resume = request.form.get("include_resume", "").strip().lower() in {"1", "true", "on", "yes"}
+    resume_text = ""
+    if include_resume:
+        row = db.execute(
+            "SELECT resume_text FROM candidate_profiles WHERE user_id = ?",
+            (g.user["id"],),
+        ).fetchone()
+        resume_text = row["resume_text"] if row else ""
+
+    ai_insight = generate_candidate_insight(
+        config=current_app.config,
+        candidate_skills=candidate_skills,
+        job_title=job["title"],
+        company_name=job["company_name"],
+        job_description=job["description"],
+        required_skills=required_skills,
+        include_resume=include_resume,
+        resume_text=resume_text,
+    )
+    return render_template(
+        "candidate/job_detail.html",
+        job=job,
+        required_skills=required_skills,
+        breakdown=breakdown,
+        applied=applied,
+        ai_insight=ai_insight,
     )
 
 
 @bp.post("/jobs/<int:job_id>/apply")
 @role_required("Candidate")
 def apply(job_id: int):
-    db = get_db()
-    if db.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone() is None:
-        abort(404, description="Job not found")
     try:
-        with transaction(db):
-            db.execute(
-                """
-                INSERT INTO applications(candidate_id, job_id, status, created_at)
-                VALUES (?, ?, 'Pending', ?)
-                """,
-                (g.user["id"], job_id, iso_utc(utc_now())),
-            )
-    except sqlite3.IntegrityError:
-        abort(409, description="You have already applied to this job")
+        apply_to_job(get_db(), g.user["id"], job_id)
+    except DomainError as exc:
+        abort(exc.status_code, description=exc.message)
     flash("Application submitted with Pending status.", "success")
     return redirect(url_for("candidate.applications"))
 

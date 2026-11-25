@@ -12,6 +12,7 @@ def _demo_app(tmp_path, **overrides):
         "DEMO_LOGIN_PER_MINUTE": 2,
         "DEMO_REGISTER_PER_MINUTE": 2,
         "DEMO_WRITE_PER_MINUTE": 2,
+        "DEMO_AI_PER_MINUTE": 2,
         "DEMO_MAX_USERS": 2,
         "DEMO_MAX_JOBS": 2,
         "DEMO_MAX_APPLICATIONS": 2,
@@ -155,3 +156,31 @@ def test_demo_write_rate_limit_applies_after_login(tmp_path):
         headers={"CF-Connecting-IP": "203.0.113.50"},
     )
     assert limited.status_code == 429
+
+
+def test_demo_ai_rate_limit_returns_429(tmp_path):
+    from recruiting.seed import seed_demo_data
+
+    app = _demo_app(tmp_path, DEMO_MAX_USERS=20, DEMO_AI_PER_MINUTE=2, DEMO_WRITE_PER_MINUTE=20)
+    with app.app_context():
+        seed_demo_data(get_db())
+        job_id = get_db().execute("SELECT id FROM jobs WHERE title='Backend Engineer'").fetchone()["id"]
+    client = app.test_client()
+    assert client.post(
+        "/auth/login",
+        data={"username": "bob", "password": "DemoPass123!"},
+        headers={"CF-Connecting-IP": "203.0.113.60"},
+    ).status_code == 302
+
+    for _ in range(2):
+        ok = client.post(
+            f"/candidate/jobs/{job_id}/ai-insight",
+            headers={"CF-Connecting-IP": "203.0.113.60"},
+        )
+        assert ok.status_code == 200
+
+    blocked = client.post(
+        f"/candidate/jobs/{job_id}/ai-insight",
+        headers={"CF-Connecting-IP": "203.0.113.60"},
+    )
+    assert blocked.status_code == 429

@@ -4,16 +4,22 @@
 <section class="panel">
   <p class="eyebrow">{{ application.company_name }}</p>
   <h1>{{ application.title }}</h1>
-  <p>Status: <span class="pill">{{ application.status }}</span></p>
+  <p>Status: <span class="pill status-{{ application.status|lower }}">{{ application.status }}</span></p>
   {% if application.booked_start %}
-    <div class="notice"><strong>Interview booked</strong><br>{{ application.booked_start|localtime }}–{{ application.booked_end|localtime }}</div>
+    <div class="notice">
+      <strong>Interview booked</strong><br>
+      {{ application.booked_start|localrange(application.booked_end) }}
+    </div>
   {% elif application.status == 'Interviewing' %}
     <h2>Available interview slots</h2>
+    <p class="muted">All times are displayed in <strong>Asia/Shanghai (UTC+8)</strong>. Each booking is atomic at the database layer.</p>
     <div class="slot-grid">
       {% for slot in available_slots %}
         <form method="post" action="{{ url_for('candidate.book', application_id=application.id, slot_id=slot.id) }}" class="slot">
-          <strong>{{ slot.start_at|localtime }}</strong>
-          <span>30 minutes</span>
+          <div>
+            <strong>{{ slot.start_at|localrange(slot.end_at) }}</strong>
+            <div class="muted">30-minute interview slot</div>
+          </div>
           <button class="button small" type="submit">Book</button>
         </form>
       {% else %}<p class="muted">No available interview slots for this employer.</p>{% endfor %}

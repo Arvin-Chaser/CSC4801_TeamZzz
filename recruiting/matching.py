@@ -46,6 +46,32 @@ def skill_match_score(candidate_skills, required_skills) -> int:
     return (100 * len(candidate & required)) // len(required)
 
 
+def explain_skill_match(candidate_skills, required_skills) -> dict:
+    cleaned_candidate = normalize_skills(candidate_skills)
+    cleaned_required = normalize_skills(required_skills)
+    candidate_keys = {item.lower() for item in cleaned_candidate}
+    required_keys = {item.lower() for item in cleaned_required}
+
+    matched = [skill for skill in cleaned_required if skill.lower() in candidate_keys]
+    missing = [skill for skill in cleaned_required if skill.lower() not in candidate_keys]
+    extra = [skill for skill in cleaned_candidate if skill.lower() not in required_keys]
+    score = skill_match_score(cleaned_candidate, cleaned_required)
+
+    next_score = None
+    if missing and cleaned_required:
+        next_score = (100 * (len(matched) + 1)) // len(cleaned_required)
+
+    return {
+        "score": score,
+        "matched_skills": matched,
+        "missing_skills": missing,
+        "extra_skills": extra,
+        "matched_count": len(matched),
+        "required_count": len(cleaned_required),
+        "next_skill_score": next_score,
+    }
+
+
 def rank_jobs(conn, candidate_id: int) -> list[dict]:
     profile = conn.execute(
         "SELECT skills_json FROM candidate_profiles WHERE user_id = ?",
@@ -64,7 +90,11 @@ def rank_jobs(conn, candidate_id: int) -> list[dict]:
     for row in rows:
         item = dict(row)
         item["required_skills"] = skills_from_json(item.pop("required_skills_json"))
-        item["match_score"] = skill_match_score(candidate_skills, item["required_skills"])
+        breakdown = explain_skill_match(candidate_skills, item["required_skills"])
+        item["match_score"] = breakdown["score"]
+        item["matched_skills"] = breakdown["matched_skills"]
+        item["missing_skills"] = breakdown["missing_skills"]
+        item["next_skill_score"] = breakdown["next_skill_score"]
         result.append(item)
     result.sort(key=lambda item: (-item["match_score"], item["title"].casefold(), item["id"]))
     return result
@@ -81,7 +111,7 @@ def rank_applicants(conn, job_id: int) -> list[dict]:
     rows = conn.execute(
         """
         SELECT a.id AS application_id, a.candidate_id, a.status,
-               u.username, p.display_name, p.skills_json,
+               u.username, p.display_name, p.skills_json, p.resume_text,
                b.id AS booking_id, s.start_at AS interview_start,
                s.end_at AS interview_end
         FROM applications AS a
@@ -97,7 +127,10 @@ def rank_applicants(conn, job_id: int) -> list[dict]:
     for row in rows:
         item = dict(row)
         item["skills"] = skills_from_json(item.pop("skills_json"))
-        item["match_score"] = skill_match_score(item["skills"], required_skills)
+        breakdown = explain_skill_match(item["skills"], required_skills)
+        item["match_score"] = breakdown["score"]
+        item["matched_skills"] = breakdown["matched_skills"]
+        item["missing_skills"] = breakdown["missing_skills"]
         result.append(item)
     result.sort(
         key=lambda item: (

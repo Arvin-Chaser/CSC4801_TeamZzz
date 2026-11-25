@@ -1,26 +1,120 @@
 {% extends 'base.html' %}
 {% block title %}Applicants · {{ job.title }}{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">Applicant management</p><h1>{{ job.title }}</h1></div></div>
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Applicant management</p>
+    <h1>{{ job.title }}</h1>
+  </div>
+  <a class="button secondary" href="{{ url_for('employer.dashboard') }}">Back to dashboard</a>
+</div>
+
+<div class="kpi-strip">
+  <div class="kpi-card"><div class="kpi-label">Applicants</div><div class="kpi-value">{{ summary.total }}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Pending</div><div class="kpi-value">{{ summary.counts['Pending'] }}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Interviewing</div><div class="kpi-value">{{ summary.counts['Interviewing'] }}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Accepted</div><div class="kpi-value">{{ summary.counts['Accepted'] }}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Avg match</div><div class="kpi-value">{{ summary.avg_score }}%</div></div>
+</div>
+
+{% if required_skills %}
+  <p class="muted">Required skills: <strong>{{ required_skills|join(', ') }}</strong></p>
+{% else %}
+  <p class="muted">Required skills: <strong>None (open skills — all applicants score 100%)</strong></p>
+{% endif %}
+
+{% if ai_insight %}
+<section class="panel ai-panel">
+  <div class="ai-header">
+    <div>
+      <p class="eyebrow">Optional FP-MATCH-2 · Secondary Screening Insight</p>
+      <h2>Applicant Screening Notes</h2>
+    </div>
+    <span class="pill {{ 'source-llm' if ai_insight.source == 'llm' else 'source-fallback' }}">
+      {{ 'LLM · ' ~ ai_insight.model if ai_insight.source == 'llm' else 'Offline deterministic fallback' }}
+    </span>
+  </div>
+  <div class="notice">
+    <strong>{{ ai_insight.summary }}</strong>
+    <p class="muted">{{ ai_insight.notice }}</p>
+  </div>
+  <div class="ai-grid">
+    <div class="ai-col">
+      <h3>Strengths</h3>
+      <ul>
+        {% for entry in ai_insight.strengths %}<li>{{ entry }}</li>{% else %}<li>None highlighted.</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="ai-col">
+      <h3>Gaps to probe</h3>
+      <ul>
+        {% for entry in ai_insight.gaps %}<li>{{ entry }}</li>{% else %}<li>No required gaps.</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="ai-col">
+      <h3>Interview suggestions</h3>
+      <ul>
+        {% for entry in ai_insight.next_steps %}<li>{{ entry }}</li>{% else %}<li>Review candidate skills.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Candidate</th><th>Skills</th><th>Match</th><th>Status</th><th>Interview</th><th>Update</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Candidate</th>
+      <th>Skills &amp; Breakdown</th>
+      <th>Match</th>
+      <th>Status</th>
+      <th>Interview (Asia/Shanghai)</th>
+      <th>Resume</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
   <tbody>
   {% for item in applicants %}
     <tr>
       <td><strong>{{ item.display_name }}</strong><br><span class="muted">{{ item.username }}</span></td>
-      <td>{{ item.skills|join(', ') if item.skills else 'None' }}</td>
-      <td><strong>{{ item.match_score }}%</strong></td>
-      <td>{{ item.status }}</td>
-      <td>{{ item.interview_start|localtime if item.interview_start else 'Not booked' }}</td>
       <td>
-        <form method="post" action="{{ url_for('employer.application_status', application_id=item.application_id) }}" class="inline">
-          <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == item.status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
-          <button class="button small" type="submit">Save</button>
-        </form>
+        <div>{{ item.skills|join(', ') if item.skills else 'None' }}</div>
+        {% if required_skills %}
+          <div class="pill-group">
+            {% for skill in item.matched_skills %}<span class="pill matched">{{ skill }}</span>{% endfor %}
+            {% for skill in item.missing_skills %}<span class="pill missing">Missing: {{ skill }}</span>{% endfor %}
+          </div>
+        {% endif %}
+      </td>
+      <td><strong>{{ item.match_score }}%</strong></td>
+      <td><span class="pill status-{{ item.status|lower }}">{{ item.status }}</span></td>
+      <td>{{ item.interview_start|localrange(item.interview_end) if item.interview_start else 'Not booked' }}</td>
+      <td>
+        {% if item.resume_text %}
+          <details class="resume-details">
+            <summary>View resume</summary>
+            <pre class="resume-preview">{{ item.resume_text }}</pre>
+          </details>
+        {% else %}
+          <span class="muted">No resume</span>
+        {% endif %}
+      </td>
+      <td>
+        <div class="stack">
+          <form method="post" action="{{ url_for('employer.application_status', application_id=item.application_id) }}" class="inline">
+            <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == item.status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+            <button class="button small" type="submit">Save</button>
+          </form>
+          <form method="post" action="{{ url_for('employer.application_ai_insight', application_id=item.application_id) }}" class="inline">
+            <button class="button secondary small" type="submit">
+              {{ 'Refresh insight' if ai_application_id == item.application_id else 'AI insight' }}
+            </button>
+          </form>
+        </div>
       </td>
     </tr>
-  {% else %}<tr><td colspan="6">No applicants.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7">No applicants.</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
